@@ -1,5 +1,6 @@
 """Database module for the referral bot."""
 import aiosqlite
+import random
 import secrets
 from typing import Optional, Dict, List, Tuple
 from datetime import datetime, timedelta
@@ -155,6 +156,34 @@ class Database:
                 UNIQUE(user_id, link)
             )
         ''')
+
+        await self.conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_reward_state (
+                user_id INTEGER NOT NULL,
+                reward_type TEXT NOT NULL,
+                last_claimed TIMESTAMP,
+                streak INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, reward_type),
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        ''')
+
+        await self.conn.execute('''
+            CREATE TABLE IF NOT EXISTS box_game_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                winning_box INTEGER NOT NULL,
+                reward REAL NOT NULL,
+                selected_box INTEGER,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        ''')
+        await self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_box_game_user_status ON box_game_sessions(user_id, status, completed_at)"
+        )
 
         await self.conn.commit()
 
@@ -619,6 +648,211 @@ class Database:
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    # ============ FARM / MINI GAMES ============
+
+    @staticmethod
+    def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _timestamp(value: datetime) -> str:
+        return value.replace(microsecond=0).isoformat(sep=" ")
+
+    async def get_daily_bonus_status(self, user_id: int) -> Dict:
+        """Return whether the user can claim the daily bonus and their streak."""
+        async with self.conn.execute(
+            """SELECT last_claimed, streak FROM user_reward_state
+               WHERE user_id = ? AND reward_type = 'daily'""",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        now = datetime.now()
+        last_claimed = self._parse_timestamp(row["last_claimed"]) if row else None
+        streak = row["streak"] if row else 0
+        next_claim_at = last_claimed + timedelta(hours=24) if last_claimed else None
+        can_claim = not next_claim_at or now >= next_claim_at
+
+        return {
+            "can_claim": can_claim,
+            "streak": streak,
+            "next_claim_at": next_claim_at,
+            "seconds_left": max(0, int((next_claim_at - now).total_seconds())) if next_claim_at and not can_claim else 0,
+        }
+
+    async def claim_daily_bonus(self, user_id: int) -> Dict:
+        """Claim the daily bonus once per 24 hours."""
+        if not await self.get_user(user_id):
+            return {"ok": False, "not_registered": True, "seconds_left": 0}
+
+        status = await self.get_daily_bonus_status(user_id)
+        if not status["can_claim"]:
+            return {"ok": False, **status}
+
+        now = datetime.now()
+        async with self.conn.execute(
+            """SELECT last_claimed, streak FROM user_reward_state
+               WHERE user_id = ? AND reward_type = 'daily'""",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        last_claimed = self._parse_timestamp(row["last_claimed"]) if row else None
+        if last_claimed and now - last_claimed <= timedelta(hours=48):
+            streak = (row["streak"] or 0) + 1
+        else:
+            streak = 1
+
+        base_reward = Config.DAILY_BONUS_AMOUNT
+        streak_bonus = (
+            Config.DAILY_STREAK_BONUS_AMOUNT
+            if Config.DAILY_STREAK_BONUS_DAYS > 0 and streak % Config.DAILY_STREAK_BONUS_DAYS == 0
+            else 0
+        )
+        total_reward = base_reward + streak_bonus
+
+        await self.conn.execute(
+            "UPDATE users SET balance = balance + ?, total_earned = total_earned + ? WHERE user_id = ?",
+            (total_reward, total_reward, user_id)
+        )
+        await self.conn.execute(
+            """INSERT INTO user_reward_state (user_id, reward_type, last_claimed, streak)
+               VALUES (?, 'daily', ?, ?)
+               ON CONFLICT(user_id, reward_type)
+               DO UPDATE SET last_claimed = excluded.last_claimed, streak = excluded.streak""",
+            (user_id, self._timestamp(now), streak)
+        )
+        await self.log_activity(
+            user_id,
+            "daily_bonus",
+            f"Claimed {total_reward} stars (base {base_reward}, streak bonus {streak_bonus}, streak {streak})"
+        )
+        await self.conn.commit()
+
+        user = await self.get_user(user_id)
+        return {
+            "ok": True,
+            "reward": total_reward,
+            "base_reward": base_reward,
+            "streak_bonus": streak_bonus,
+            "streak": streak,
+            "balance": user["balance"] if user else 0,
+        }
+
+    async def get_box_game_status(self, user_id: int) -> Dict:
+        """Return cooldown status for the box mini-game."""
+        async with self.conn.execute(
+            """SELECT completed_at FROM box_game_sessions
+               WHERE user_id = ? AND status IN ('won', 'lost')
+               ORDER BY completed_at DESC LIMIT 1""",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        now = datetime.now()
+        completed_at = self._parse_timestamp(row["completed_at"]) if row else None
+        next_play_at = (
+            completed_at + timedelta(minutes=Config.BOX_GAME_COOLDOWN_MINUTES)
+            if completed_at else None
+        )
+        can_play = not next_play_at or now >= next_play_at
+
+        return {
+            "can_play": can_play,
+            "next_play_at": next_play_at,
+            "seconds_left": max(0, int((next_play_at - now).total_seconds())) if next_play_at and not can_play else 0,
+        }
+
+    async def start_box_game(self, user_id: int) -> Dict:
+        """Create or return a pending star-box game session."""
+        if not await self.get_user(user_id):
+            return {"ok": False, "not_registered": True, "seconds_left": 0}
+
+        status = await self.get_box_game_status(user_id)
+        if not status["can_play"]:
+            return {"ok": False, **status}
+
+        await self.conn.execute(
+            """UPDATE box_game_sessions
+               SET status = 'expired', completed_at = CURRENT_TIMESTAMP
+               WHERE user_id = ? AND status = 'pending'
+                 AND created_at < datetime('now', '-15 minutes')""",
+            (user_id,)
+        )
+
+        async with self.conn.execute(
+            """SELECT id, reward FROM box_game_sessions
+               WHERE user_id = ? AND status = 'pending'
+               ORDER BY created_at DESC LIMIT 1""",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {"ok": True, "session_id": row["id"], "reward": row["reward"], "existing": True}
+
+        winning_box = random.randint(1, 3)
+        reward = Config.BOX_GAME_REWARD_AMOUNT
+        cursor = await self.conn.execute(
+            "INSERT INTO box_game_sessions (user_id, winning_box, reward) VALUES (?, ?, ?)",
+            (user_id, winning_box, reward)
+        )
+        session_id = cursor.lastrowid
+        await self.conn.commit()
+        return {"ok": True, "session_id": session_id, "reward": reward, "existing": False}
+
+    async def complete_box_game(self, user_id: int, session_id: int, selected_box: int) -> Dict:
+        """Finish a pending box-game session and credit the reward on win."""
+        async with self.conn.execute(
+            """SELECT id, user_id, winning_box, reward, status FROM box_game_sessions
+               WHERE id = ? AND user_id = ?""",
+            (session_id, user_id)
+        ) as cursor:
+            session = await cursor.fetchone()
+
+        if not session:
+            return {"ok": False, "message": "Игра не найдена"}
+        if session["status"] != "pending":
+            return {"ok": False, "message": "Эта игра уже завершена"}
+
+        won = selected_box == session["winning_box"]
+        status = "won" if won else "lost"
+        reward = session["reward"] if won else 0
+        completed_at = self._timestamp(datetime.now())
+
+        if won:
+            await self.conn.execute(
+                "UPDATE users SET balance = balance + ?, total_earned = total_earned + ? WHERE user_id = ?",
+                (session["reward"], session["reward"], user_id)
+            )
+
+        await self.conn.execute(
+            """UPDATE box_game_sessions
+               SET selected_box = ?, status = ?, completed_at = ?
+               WHERE id = ?""",
+            (selected_box, status, completed_at, session_id)
+        )
+        await self.log_activity(
+            user_id,
+            "box_game",
+            f"Selected {selected_box}, winning {session['winning_box']}, reward {reward}"
+        )
+        await self.conn.commit()
+
+        user = await self.get_user(user_id)
+        return {
+            "ok": True,
+            "won": won,
+            "reward": reward,
+            "winning_box": session["winning_box"],
+            "selected_box": selected_box,
+            "balance": user["balance"] if user else 0,
+        }
 
     # ============ PROMO CODES ============
 

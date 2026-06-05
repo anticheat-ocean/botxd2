@@ -10,7 +10,8 @@ from aiogram.fsm.state import State, StatesGroup
 from database import Database
 from keyboards import (
     main_keyboard, withdraw_keyboard, back_button,
-    balance_keyboard, referral_keyboard, notification_keyboard
+    balance_keyboard, referral_keyboard, notification_keyboard,
+    farm_keyboard, box_game_keyboard
 )
 from utils import format_datetime, format_status, get_user_display_name, esc, fmt_amount
 from config import Config
@@ -23,6 +24,51 @@ logger = logging.getLogger(__name__)
 class PromoActivateStates(StatesGroup):
     """FSM state while a user is entering a promo code."""
     waiting = State()
+
+
+def _format_wait(seconds: int) -> str:
+    """Format cooldown seconds for user-facing messages."""
+    seconds = max(0, int(seconds or 0))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, _ = divmod(remainder, 60)
+    if hours:
+        return f"{hours} ч {minutes} мин"
+    if minutes:
+        return f"{minutes} мин"
+    return "меньше минуты"
+
+
+async def _farm_menu_text(db: Database, user_id: int) -> str:
+    user = await db.get_user(user_id)
+    if not user:
+        return (
+            "🎮 <b>Фарм Stars</b>\n\n"
+            "Сначала нажми /start, чтобы бот создал твой профиль."
+        )
+
+    daily = await db.get_daily_bonus_status(user_id)
+    boxes = await db.get_box_game_status(user_id)
+
+    daily_line = (
+        "можно забрать сейчас"
+        if daily["can_claim"]
+        else f"через {_format_wait(daily['seconds_left'])}"
+    )
+    boxes_line = (
+        "можно играть сейчас"
+        if boxes["can_play"]
+        else f"через {_format_wait(boxes['seconds_left'])}"
+    )
+
+    return (
+        "🎮 <b>Фарм Stars</b>\n\n"
+        "Тут можно чуть-чуть добирать звёзды между рефералами.\n"
+        "Главный фарм всё равно через друзей, но эти штуки держат темп.\n\n"
+        f"🎁 Ежедневный бонус: <b>{daily_line}</b>\n"
+        f"🔥 Серия входов: <b>{daily['streak']} дн.</b>\n"
+        f"🎲 Звёздные коробки: <b>{boxes_line}</b>\n\n"
+        f"💰 Баланс: <b>{fmt_amount(user['balance'] if user else 0)} ⭐</b>"
+    )
 
 
 @router.message(Command("start"))
@@ -78,6 +124,137 @@ async def cmd_start(message: Message, db: Database, bot, piarflow_manager):
     else:
         # No anti-twink: finish onboarding right away
         await complete_onboarding(bot, db, message.from_user)
+
+
+@router.message(Command("farm"))
+async def cmd_farm(message: Message, db: Database):
+    """Open the engagement/farm menu."""
+    await message.answer(
+        await _farm_menu_text(db, message.from_user.id),
+        parse_mode=ParseMode.HTML,
+        reply_markup=farm_keyboard()
+    )
+    await db.update_last_active(message.from_user.id)
+
+
+@router.callback_query(F.data == "farm_menu")
+async def show_farm_menu(callback: CallbackQuery, db: Database):
+    """Show the engagement/farm menu."""
+    await callback.message.edit_text(
+        await _farm_menu_text(db, callback.from_user.id),
+        parse_mode=ParseMode.HTML,
+        reply_markup=farm_keyboard()
+    )
+    await callback.answer()
+    await db.update_last_active(callback.from_user.id)
+
+
+@router.callback_query(F.data == "daily_bonus")
+async def claim_daily_bonus(callback: CallbackQuery, db: Database):
+    """Claim the daily farm bonus."""
+    result = await db.claim_daily_bonus(callback.from_user.id)
+    if result.get("not_registered"):
+        await callback.answer("Сначала нажми /start", show_alert=True)
+        return
+    if not result["ok"]:
+        await callback.answer(
+            f"🎁 Бонус ещё не готов. Возвращайся через {_format_wait(result['seconds_left'])}.",
+            show_alert=True
+        )
+        return
+
+    bonus_line = ""
+    if result["streak_bonus"]:
+        bonus_line = (
+            f"\n🔥 Бонус за серию: <b>+{fmt_amount(result['streak_bonus'])} ⭐</b>"
+        )
+
+    await callback.message.edit_text(
+        "🎁 <b>Ежедневный бонус забран!</b>\n\n"
+        f"✨ Начислено: <b>+{fmt_amount(result['reward'])} ⭐</b>"
+        f"{bonus_line}\n"
+        f"🔥 Серия входов: <b>{result['streak']} дн.</b>\n"
+        f"💰 Баланс: <b>{fmt_amount(result['balance'])} ⭐</b>\n\n"
+        "Завтра можно забрать снова. Не теряй серию.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=farm_keyboard()
+    )
+    await callback.answer(f"+{fmt_amount(result['reward'])} ⭐")
+    await db.update_last_active(callback.from_user.id)
+
+
+@router.callback_query(F.data == "box_game")
+async def start_box_game(callback: CallbackQuery, db: Database):
+    """Start the three-box mini-game."""
+    result = await db.start_box_game(callback.from_user.id)
+    if result.get("not_registered"):
+        await callback.answer("Сначала нажми /start", show_alert=True)
+        return
+    if not result["ok"]:
+        await callback.answer(
+            f"🎲 Коробки отдыхают. Следующая попытка через {_format_wait(result['seconds_left'])}.",
+            show_alert=True
+        )
+        return
+
+    await callback.message.edit_text(
+        "🎲 <b>Звёздные коробки</b>\n\n"
+        "В одной из трёх коробок лежит бонус.\n"
+        f"Угадаешь — получишь <b>+{fmt_amount(result['reward'])} ⭐</b>.\n\n"
+        "Выбирай коробку:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=box_game_keyboard(result["session_id"])
+    )
+    await callback.answer()
+    await db.update_last_active(callback.from_user.id)
+
+
+@router.callback_query(F.data.startswith("box_pick:"))
+async def finish_box_game(callback: CallbackQuery, db: Database):
+    """Finish the box mini-game."""
+    try:
+        _, session_id, selected_box = callback.data.split(":")
+        session_id = int(session_id)
+        selected_box = int(selected_box)
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка игры", show_alert=True)
+        return
+
+    result = await db.complete_box_game(callback.from_user.id, session_id, selected_box)
+    if not result["ok"]:
+        await callback.answer(result["message"], show_alert=True)
+        return
+
+    boxes = []
+    for i in range(1, 4):
+        if i == result["winning_box"]:
+            boxes.append("⭐")
+        elif i == result["selected_box"]:
+            boxes.append("❌")
+        else:
+            boxes.append("⬛")
+
+    if result["won"]:
+        title = "✅ <b>Попал!</b>"
+        body = f"Ты выбрал коробку {selected_box} и забрал <b>+{fmt_amount(result['reward'])} ⭐</b>."
+        toast = f"+{fmt_amount(result['reward'])} ⭐"
+    else:
+        title = "😅 <b>Мимо</b>"
+        body = f"Ты выбрал коробку {selected_box}, а звезда была в коробке {result['winning_box']}."
+        toast = "В следующий раз повезёт"
+
+    await callback.message.edit_text(
+        f"🎲 <b>Звёздные коробки</b>\n\n"
+        f"{' '.join(boxes)}\n\n"
+        f"{title}\n"
+        f"{body}\n\n"
+        f"💰 Баланс: <b>{fmt_amount(result['balance'])} ⭐</b>\n"
+        f"⏳ Следующая попытка через {_format_wait(Config.BOX_GAME_COOLDOWN_MINUTES * 60)}.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=farm_keyboard()
+    )
+    await callback.answer(toast)
+    await db.update_last_active(callback.from_user.id)
 
 
 @router.callback_query(F.data == "my_link")

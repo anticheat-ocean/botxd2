@@ -7,6 +7,7 @@ def main_keyboard() -> InlineKeyboardMarkup:
     """Main menu keyboard."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔗 Моя реферальная ссылка", callback_data="my_link")],
+        [InlineKeyboardButton(text="🎮 Фарм Stars", callback_data="farm_menu")],
         [InlineKeyboardButton(text="⭐ Мой баланс", callback_data="balance")],
         [InlineKeyboardButton(text="💸 Вывести Stars", callback_data="withdraw")],
         [InlineKeyboardButton(text="🎟 Активировать промокод", callback_data="enter_promo")],
@@ -14,6 +15,29 @@ def main_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
         [InlineKeyboardButton(text="🏆 Топ рефералов", callback_data="top_referrers")],
         [InlineKeyboardButton(text="📜 История выводов", callback_data="withdrawal_history")]
+    ])
+
+
+def farm_keyboard() -> InlineKeyboardMarkup:
+    """Buttons for the engagement/farm menu."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎁 Ежедневный бонус", callback_data="daily_bonus")],
+        [InlineKeyboardButton(text="🎲 Звёздные коробки", callback_data="box_game")],
+        [InlineKeyboardButton(text="🔗 Позвать друга", callback_data="my_link")],
+        [InlineKeyboardButton(text="🏆 Топ рефералов", callback_data="top_referrers")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")]
+    ])
+
+
+def box_game_keyboard(session_id: int) -> InlineKeyboardMarkup:
+    """Three-box mini-game keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🎁 1", callback_data=f"box_pick:{session_id}:1"),
+            InlineKeyboardButton(text="🎁 2", callback_data=f"box_pick:{session_id}:2"),
+            InlineKeyboardButton(text="🎁 3", callback_data=f"box_pick:{session_id}:3"),
+        ],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="farm_menu")]
     ])
 
 

@@ -27,6 +27,11 @@ class Config:
     WITHDRAW_AMOUNTS: List[int] = [
         int(x.strip()) for x in os.getenv("WITHDRAW_AMOUNTS", "15,25,50,100").split(",")
     ]
+    DAILY_BONUS_AMOUNT: float = float(os.getenv("DAILY_BONUS_AMOUNT", "0.2"))
+    DAILY_STREAK_BONUS_DAYS: int = int(os.getenv("DAILY_STREAK_BONUS_DAYS", "7"))
+    DAILY_STREAK_BONUS_AMOUNT: float = float(os.getenv("DAILY_STREAK_BONUS_AMOUNT", "1"))
+    BOX_GAME_REWARD_AMOUNT: float = float(os.getenv("BOX_GAME_REWARD_AMOUNT", "0.1"))
+    BOX_GAME_COOLDOWN_MINUTES: int = int(os.getenv("BOX_GAME_COOLDOWN_MINUTES", "30"))
 
     # Database
     DATABASE_PATH: str = os.getenv("DATABASE_PATH", "/app/data/referral_bot.db")
