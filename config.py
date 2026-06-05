@@ -21,8 +21,9 @@ class Config:
         """Where withdrawal notifications go: the admin channel if set, else admin's DM."""
         return cls.ADMIN_CHANNEL_ID if cls.ADMIN_CHANNEL_ID else cls.ADMIN_ID
 
-    # Reward settings (float to support fractional rewards like 3.5)
-    REWARD_PER_REFERRAL: float = float(os.getenv("REWARD_PER_REFERRAL", "5"))
+    # Reward settings. Locked to the requested payout so stale hosting env vars
+    # cannot accidentally keep the old value.
+    REWARD_PER_REFERRAL: float = 2.6
     WITHDRAW_AMOUNTS: List[int] = [
         int(x.strip()) for x in os.getenv("WITHDRAW_AMOUNTS", "15,25,50,100").split(",")
     ]

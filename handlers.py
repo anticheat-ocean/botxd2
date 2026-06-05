@@ -272,6 +272,7 @@ async def show_referrals(callback: CallbackQuery, db: Database):
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔗 Получить ссылку", callback_data="my_link")],
+            [InlineKeyboardButton(text="🏆 Топ рефералов", callback_data="top_referrers")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")]
         ])
     )
@@ -312,20 +313,17 @@ async def show_stats(callback: CallbackQuery, db: Database):
     await callback.answer()
 
 
-@router.callback_query(F.data == "top_referrers")
-async def show_top_referrers(callback: CallbackQuery, db: Database):
-    """Show top referrers leaderboard."""
+async def _top_referrers_text(db: Database, user_id: int):
     top_users = await db.get_top_referrers(limit=10)
-    user = await db.get_user(callback.from_user.id)
-
     if not top_users:
-        await callback.answer("Пока нет данных для рейтинга")
-        return
+        return None
+
+    user = await db.get_user(user_id)
 
     # Find user's position
     user_position = None
     for i, top_user in enumerate(top_users, 1):
-        if top_user['user_id'] == callback.from_user.id:
+        if top_user['user_id'] == user_id:
             user_position = i
             break
 
@@ -340,7 +338,7 @@ async def show_top_referrers(callback: CallbackQuery, db: Database):
         earned = top_user['total_earned']
 
         # Highlight current user
-        if top_user['user_id'] == callback.from_user.id:
+        if top_user['user_id'] == user_id:
             leaderboard.append(f"<b>{medal} {esc(name)} — {refs} реф. ({fmt_amount(earned)} ⭐)</b>")
         else:
             leaderboard.append(f"{medal} {esc(name)} — {refs} реф. ({fmt_amount(earned)} ⭐)")
@@ -349,6 +347,33 @@ async def show_top_referrers(callback: CallbackQuery, db: Database):
 
     if user and not user_position and user['total_referrals'] > 0:
         text += f"\n\n<i>Ваша позиция: вне топ-10</i>"
+
+    return text
+
+
+@router.message(Command("top"))
+async def cmd_top_referrers(message: Message, db: Database):
+    """Show top referrers leaderboard by command."""
+    text = await _top_referrers_text(db, message.from_user.id)
+    if not text:
+        await message.answer("Пока нет данных для рейтинга")
+        return
+
+    await message.answer(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=back_button()
+    )
+    await db.update_last_active(message.from_user.id)
+
+
+@router.callback_query(F.data == "top_referrers")
+async def show_top_referrers(callback: CallbackQuery, db: Database):
+    """Show top referrers leaderboard."""
+    text = await _top_referrers_text(db, callback.from_user.id)
+    if not text:
+        await callback.answer("Пока нет данных для рейтинга")
+        return
 
     await callback.message.edit_text(
         text,
