@@ -1,0 +1,25 @@
+services:
+  botxd2:
+    build: .
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      ADMIN_ID: ${ADMIN_ID}
+      ADMIN_CHANNEL_ID: ${ADMIN_CHANNEL_ID:-0}
+      REWARD_PER_REFERRAL: ${REWARD_PER_REFERRAL:-5}
+      WITHDRAW_AMOUNTS: ${WITHDRAW_AMOUNTS:-15,25,50,100}
+      DATABASE_PATH: /data/referral_bot.db
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ANTITWINK_ENABLED: ${ANTITWINK_ENABLED:-true}
+      NEW_ACCOUNT_ID_THRESHOLD: ${NEW_ACCOUNT_ID_THRESHOLD:-8000000000}
+      TWINK_BLOCK_REFERRAL: ${TWINK_BLOCK_REFERRAL:-false}
+      BLOCK_ARABIC: ${BLOCK_ARABIC:-true}
+      PHONE_GATE_ENABLED: ${PHONE_GATE_ENABLED:-true}
+      PIARFLOW_API_KEY: ${PIARFLOW_API_KEY:-}
+      PIARFLOW_ENABLED: ${PIARFLOW_ENABLED:-false}
+      PIARFLOW_MAX_SPONSORS: ${PIARFLOW_MAX_SPONSORS:-5}
+    volumes:
+      - botxd2-data:/data
+
+volumes:
+  botxd2-data:

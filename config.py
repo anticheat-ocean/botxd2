@@ -1,0 +1,70 @@
+"""Configuration module for the referral bot."""
+import os
+from typing import List
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+class Config:
+    """Bot configuration class."""
+
+    # Telegram settings
+    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+    ADMIN_ID: int = int(os.getenv("ADMIN_ID", "0"))
+    # Channel where withdrawal requests are posted for moderation.
+    # Bot must be an admin of this channel. Falls back to the admin's private chat if unset.
+    ADMIN_CHANNEL_ID: int = int(os.getenv("ADMIN_CHANNEL_ID", "0") or "0")
+
+    @classmethod
+    def admin_destination(cls) -> int:
+        """Where withdrawal notifications go: the admin channel if set, else admin's DM."""
+        return cls.ADMIN_CHANNEL_ID if cls.ADMIN_CHANNEL_ID else cls.ADMIN_ID
+
+    # Reward settings (float to support fractional rewards like 3.5)
+    REWARD_PER_REFERRAL: float = float(os.getenv("REWARD_PER_REFERRAL", "5"))
+    WITHDRAW_AMOUNTS: List[int] = [
+        int(x.strip()) for x in os.getenv("WITHDRAW_AMOUNTS", "15,25,50,100").split(",")
+    ]
+
+    # Database
+    DATABASE_PATH: str = os.getenv("DATABASE_PATH", "/app/data/referral_bot.db")
+
+    # Logging
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+
+    # Anti-spam settings
+    MIN_WITHDRAW_INTERVAL_HOURS: int = 24  # Минимальный интервал между выводами
+    MAX_PENDING_WITHDRAWALS: int = 3  # Максимум активных заявок на вывод
+
+    # Block Arabic accounts (bot is for Russian-speaking users only)
+    BLOCK_ARABIC: bool = os.getenv("BLOCK_ARABIC", "true").lower() == "true"
+    # Require users to share their phone number and block Arab-country phone codes
+    PHONE_GATE_ENABLED: bool = os.getenv("PHONE_GATE_ENABLED", "true").lower() == "true"
+
+    # Anti-twink (fake/alt account) protection
+    ANTITWINK_ENABLED: bool = os.getenv("ANTITWINK_ENABLED", "true").lower() == "true"
+    # If True, a suspected twink blocks the referral reward. If False (default),
+    # the referrer is still paid and the admin just gets an alert in DM.
+    TWINK_BLOCK_REFERRAL: bool = os.getenv("TWINK_BLOCK_REFERRAL", "false").lower() == "true"
+    # Telegram user IDs grow over time. Accounts with an ID at/above this value are
+    # treated as "very fresh" — one of several twink signals. Tune in .env if needed.
+    NEW_ACCOUNT_ID_THRESHOLD: int = int(os.getenv("NEW_ACCOUNT_ID_THRESHOLD", "8000000000"))
+
+    # PiarFlow API
+    PIARFLOW_API_KEY: str = os.getenv("PIARFLOW_API_KEY", "")
+    PIARFLOW_ENABLED: bool = os.getenv("PIARFLOW_ENABLED", "false").lower() == "true"
+    PIARFLOW_MAX_SPONSORS: int = int(os.getenv("PIARFLOW_MAX_SPONSORS", "5"))
+
+    @classmethod
+    def validate(cls) -> bool:
+        """Validate configuration."""
+        if not cls.BOT_TOKEN:
+            raise ValueError("BOT_TOKEN is not set in .env file")
+        if not cls.ADMIN_ID:
+            raise ValueError("ADMIN_ID is not set in .env file")
+        return True
+
+
+# Validate config on import
+Config.validate()

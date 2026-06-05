@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram Referral Bot botxd2
+After=network.target
+
+[Service]
+Type=simple
+# Поменяй путь, если положишь бота в другую папку
+WorkingDirectory=/root/botxd2
+ExecStart=/root/botxd2/venv/bin/python bot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
