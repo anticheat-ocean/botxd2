@@ -238,6 +238,39 @@ async def check_subscription_callback(callback: CallbackQuery, sponsor_manager: 
         )
 
 
+@router.callback_query(F.data == "check_owner_channels")
+async def check_owner_channels_callback(callback: CallbackQuery, sponsor_manager: SponsorManager, bot, sponsor_middleware=None):
+    """Handle the project-owned channels check button."""
+    user_id = callback.from_user.id
+    all_subscribed, unsubscribed = await sponsor_manager.check_owner_subscriptions(bot, user_id)
+
+    if all_subscribed:
+        if sponsor_middleware:
+            sponsor_middleware.invalidate(user_id)
+        await callback.message.edit_text(
+            "✅ <b>Отлично, наши каналы готовы!</b>\n\n"
+            "Теперь остался второй шаг — спонсорские каналы.\n\n"
+            "Нажмите /start, и бот покажет следующий список.",
+            parse_mode=ParseMode.HTML,
+        )
+        await callback.answer("✅ Проверка пройдена!", show_alert=False)
+    else:
+        await callback.answer(
+            f"❌ Вы подписались не на все наши каналы!\n"
+            f"Осталось: {len(unsubscribed)}",
+            show_alert=True
+        )
+
+
+@router.callback_query(F.data == "owner_channel_no_link")
+async def owner_channel_no_link(callback: CallbackQuery):
+    """Explain that an owner channel has no join link available."""
+    await callback.answer(
+        "У этого канала нет ссылки для входа. Добавьте бота админом в канал или укажите OWNER_CHANNEL_URLS в переменных.",
+        show_alert=True,
+    )
+
+
 @router.callback_query(F.data == "check_piarflow")
 async def check_piarflow_callback(callback: CallbackQuery, piarflow_manager, bot, sponsor_middleware=None):
     """Handle PiarFlow tasks check button."""

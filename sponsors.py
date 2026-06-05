@@ -4,6 +4,8 @@ from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 import logging
 
+from config import Config
+
 logger = logging.getLogger(__name__)
 
 
@@ -12,6 +14,62 @@ class SponsorManager:
 
     def __init__(self, db):
         self.db = db
+        self._channel_meta_cache: Dict[str, Dict] = {}
+
+    def _configured_owner_url(self, index: int) -> str:
+        return Config.OWNER_CHANNEL_URLS[index] if index < len(Config.OWNER_CHANNEL_URLS) else ""
+
+    def _configured_owner_name(self, index: int) -> str:
+        return Config.OWNER_CHANNEL_NAMES[index] if index < len(Config.OWNER_CHANNEL_NAMES) else ""
+
+    async def _resolve_channel_meta(self, bot: Bot, channel_id: str, index: int, *, owner: bool = False) -> Dict:
+        """Resolve a channel title and join URL, falling back gracefully."""
+        cache_key = f"{'owner' if owner else 'sponsor'}:{channel_id}:{index}"
+        cached = self._channel_meta_cache.get(cache_key)
+        if cached:
+            return cached
+
+        title = self._configured_owner_name(index) if owner else ""
+        url = self._configured_owner_url(index) if owner else ""
+        fallback_title = f"Наш канал {index + 1}" if owner else f"Спонсор {index + 1}"
+
+        try:
+            chat = await bot.get_chat(channel_id)
+            title = title or getattr(chat, "title", None) or getattr(chat, "full_name", None) or fallback_title
+            username = getattr(chat, "username", None)
+            if not url and username:
+                url = f"https://t.me/{username}"
+            if not url:
+                invite_link = getattr(chat, "invite_link", None)
+                if invite_link:
+                    url = invite_link
+            if not url:
+                try:
+                    invite = await bot.create_chat_invite_link(
+                        chat_id=channel_id,
+                        name="Bot access check"
+                    )
+                    url = invite.invite_link
+                except Exception as e:
+                    logger.warning(f"Could not create invite link for {channel_id}: {e}")
+        except Exception as e:
+            logger.warning(f"Could not resolve channel metadata for {channel_id}: {e}")
+
+        meta = {
+            "channel_id": str(channel_id),
+            "channel_name": title or fallback_title,
+            "channel_url": url,
+            "has_join_link": bool(url),
+        }
+        self._channel_meta_cache[cache_key] = meta
+        return meta
+
+    async def get_owner_channels(self, bot: Bot) -> List[Dict]:
+        """Get configured project-owned channels with display metadata."""
+        channels = []
+        for i, channel_id in enumerate(Config.OWNER_CHANNEL_IDS):
+            channels.append(await self._resolve_channel_meta(bot, channel_id, i, owner=True))
+        return channels
 
     async def add_sponsor(self, channel_id: str, channel_name: str, channel_url: str) -> bool:
         """Add sponsor channel."""
@@ -128,6 +186,23 @@ class SponsorManager:
 
         all_subscribed = len(unsubscribed) == 0
         return all_subscribed, unsubscribed
+
+    async def check_owner_subscriptions(self, bot: Bot, user_id: int) -> tuple[bool, List[Dict]]:
+        """
+        Check project-owned channels before paid sponsor tasks.
+        Returns: (all_subscribed, list_of_unsubscribed_channels)
+        """
+        channels = await self.get_owner_channels(bot)
+        if not channels:
+            return True, []
+
+        unsubscribed = []
+        for channel in channels:
+            is_subscribed = await self.check_user_subscription(bot, user_id, channel["channel_id"])
+            if not is_subscribed:
+                unsubscribed.append(channel)
+
+        return len(unsubscribed) == 0, unsubscribed
 
     async def log_subscription_check(self, user_id: int, passed: bool):
         """Log subscription check result."""

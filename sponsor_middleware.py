@@ -28,7 +28,12 @@ class SponsorCheckMiddleware(BaseMiddleware):
         # Cache the bot's own id so we don't call get_me() on every update
         self._bot_id: Optional[int] = None
         # Callbacks that must always be allowed (the "I subscribed" buttons)
-        self.exempt_callbacks = {"check_subscription", "check_piarflow"}
+        self.exempt_callbacks = {
+            "check_owner_channels",
+            "check_subscription",
+            "check_piarflow",
+            "owner_channel_no_link",
+        }
 
     async def _get_bot_id(self, bot) -> int:
         if self._bot_id is None:
@@ -123,7 +128,20 @@ class SponsorCheckMiddleware(BaseMiddleware):
     async def _run_gate(self, event, data, bot, user_id: int) -> bool:
         """Return True if the user may proceed, otherwise reply with the wall and return False."""
 
-        # ---- 1. PiarFlow tasks ----
+        # ---- 1. Project-owned channels first ----
+        owner_subscribed, owner_unsubscribed = await self.sponsor_manager.check_owner_subscriptions(bot, user_id)
+        if not owner_subscribed:
+            await self._show_wall(
+                event,
+                user_id,
+                links=[s["channel_url"] for s in owner_unsubscribed],
+                labels=[s["channel_name"] for s in owner_unsubscribed],
+                check_callback="check_owner_channels",
+                wall_kind="owner",
+            )
+            return False
+
+        # ---- 2. PiarFlow tasks ----
         if self.piarflow_manager:
             uncompleted = await self._get_piarflow_uncompleted(bot, user_id)
             if uncompleted:
@@ -132,10 +150,11 @@ class SponsorCheckMiddleware(BaseMiddleware):
                     user_id,
                     links=[t["link"] for t in uncompleted],
                     check_callback="check_piarflow",
+                    wall_kind="piarflow",
                 )
                 return False
 
-        # ---- 2. Manual sponsor channels ----
+        # ---- 3. Manual sponsor channels ----
         all_subscribed, unsubscribed = await self.sponsor_manager.check_all_subscriptions(bot, user_id)
         if not all_subscribed:
             await self._show_wall(
@@ -144,6 +163,7 @@ class SponsorCheckMiddleware(BaseMiddleware):
                 links=[s["channel_url"] for s in unsubscribed],
                 labels=[s["channel_name"] for s in unsubscribed],
                 check_callback="check_subscription",
+                wall_kind="manual",
             )
             return False
 
@@ -177,38 +197,57 @@ class SponsorCheckMiddleware(BaseMiddleware):
             logger.warning(f"PiarFlow check skipped for user {user_id}: {e}")
             return []
 
-    async def _show_wall(self, event, user_id: int, links, check_callback, labels=None):
+    async def _show_wall(self, event, user_id: int, links, check_callback, labels=None, wall_kind="manual"):
         """Render the subscription wall. No Markdown -> links with '+' won't break parsing."""
         await self.sponsor_manager.log_subscription_check(user_id, False)
 
         keyboard_buttons = []
         for i, link in enumerate(links, 1):
             label = labels[i - 1] if labels else f"Спонсор {i}"
-            keyboard_buttons.append([InlineKeyboardButton(text=f"📢 {label}", url=link)])
+            if link:
+                keyboard_buttons.append([InlineKeyboardButton(text=f"📢 {label}", url=link)])
+            else:
+                keyboard_buttons.append([
+                    InlineKeyboardButton(text=f"⚠️ {label}: нужна ссылка", callback_data="owner_channel_no_link")
+                ])
 
         keyboard_buttons.append([
             InlineKeyboardButton(text="✅ Я подписался — проверить", callback_data=check_callback)
         ])
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
-        text = (
-            "🔒 Чтобы пользоваться ботом, подпишитесь на спонсоров\n\n"
-            "Подпишитесь на все каналы по кнопкам ниже, "
-            "затем нажмите «Я подписался — проверить».\n\n"
-            f"📋 Осталось подписок: {len(links)}\n\n"
-            "⚠️ Не отписывайтесь — иначе доступ закроется."
-        )
+        if wall_kind == "owner":
+            text = (
+                "💎 <b>Шаг 1/2 — каналы проекта</b>\n\n"
+                "Сначала подпишись на наши основные каналы. Там будут выплаты, новости и важные объявления.\n\n"
+                f"📌 Осталось подписаться: <b>{len(links)}</b>\n\n"
+                "После подписки нажми кнопку проверки — дальше откроются спонсоры."
+            )
+        elif wall_kind == "piarflow":
+            text = (
+                "✨ <b>Шаг 2/2 — спонсоры</b>\n\n"
+                "Теперь подпишись на спонсорские каналы. Это открывает доступ к фарму, рефералке и выводу Stars.\n\n"
+                f"📋 Осталось подписок: <b>{len(links)}</b>\n\n"
+                "Нажми «Я подписался — проверить», когда всё готово."
+            )
+        else:
+            text = (
+                "✨ <b>Шаг 2/2 — спонсоры</b>\n\n"
+                "Подпишись на все каналы по кнопкам ниже, затем нажми проверку.\n\n"
+                f"📋 Осталось подписок: <b>{len(links)}</b>\n\n"
+                "⚠️ Не отписывайся — иначе доступ закроется."
+            )
 
         try:
             if isinstance(event, CallbackQuery):
                 try:
-                    await event.message.edit_text(text, reply_markup=keyboard)
+                    await event.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
                 except TelegramBadRequest:
                     # Message not modified or can't edit -> send fresh
-                    await event.message.answer(text, reply_markup=keyboard)
+                    await event.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
                 await event.answer("❌ Вы подписались не на все каналы!", show_alert=True)
             elif isinstance(event, Message):
-                await event.answer(text, reply_markup=keyboard)
+                await event.answer(text, parse_mode="HTML", reply_markup=keyboard)
         except Exception as e:
             logger.error(f"Failed to show sponsor wall to {user_id}: {e}")
 

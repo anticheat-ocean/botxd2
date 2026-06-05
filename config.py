@@ -61,7 +61,27 @@ class Config:
     # PiarFlow API
     PIARFLOW_API_KEY: str = os.getenv("PIARFLOW_API_KEY", "")
     PIARFLOW_ENABLED: bool = os.getenv("PIARFLOW_ENABLED", "false").lower() == "true"
-    PIARFLOW_MAX_SPONSORS: int = int(os.getenv("PIARFLOW_MAX_SPONSORS", "5"))
+    PIARFLOW_MAX_SPONSORS: int = int(os.getenv("PIARFLOW_MAX_SPONSORS", "10"))
+
+    # Project-owned channels shown before paid/partner sponsor tasks.
+    OWNER_CHANNEL_IDS: List[str] = [
+        x.strip()
+        for x in os.getenv(
+            "OWNER_CHANNEL_IDS",
+            "5372378314,-1003535579194,-1002749675652"
+        ).replace("\n", ",").split(",")
+        if x.strip()
+    ]
+    OWNER_CHANNEL_URLS: List[str] = [
+        x.strip()
+        for x in os.getenv("OWNER_CHANNEL_URLS", "").replace("\n", ",").split(",")
+        if x.strip()
+    ]
+    OWNER_CHANNEL_NAMES: List[str] = [
+        x.strip()
+        for x in os.getenv("OWNER_CHANNEL_NAMES", "").replace("\n", "|").split("|")
+        if x.strip()
+    ]
 
     @classmethod
     def validate(cls) -> bool:
