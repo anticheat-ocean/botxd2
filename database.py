@@ -208,6 +208,31 @@ class Database:
                 return dict(row)
         return None
 
+    async def find_user(self, query: str) -> Optional[Dict]:
+        """Find a user by numeric ID, @username or referral code."""
+        query = (query or "").strip()
+        if not query:
+            return None
+
+        if query.lstrip("-").isdigit():
+            return await self.get_user(int(query))
+
+        username = query[1:] if query.startswith("@") else query
+        async with self.conn.execute(
+            """SELECT user_id, username, first_name, referrer_id, ref_code,
+                      balance, total_earned, total_referrals, total_withdrawn,
+                      is_banned, verified, is_twink,
+                      phone, phone_country, phone_verified,
+                      created_at, last_active
+               FROM users
+               WHERE lower(username) = lower(?)
+                  OR lower(ref_code) = lower(?)
+               LIMIT 1""",
+            (username, query)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     async def register_user(
         self,
         user_id: int,
@@ -626,7 +651,8 @@ class Database:
     async def get_user_referrals(self, user_id: int, limit: int = 50) -> List[Dict]:
         """Get user's referrals."""
         async with self.conn.execute(
-            """SELECT user_id, username, first_name, created_at
+            """SELECT user_id, username, first_name, balance, total_earned,
+                      total_referrals, created_at
                FROM users
                WHERE referrer_id = ?
                ORDER BY created_at DESC

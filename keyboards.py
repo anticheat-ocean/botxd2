@@ -90,9 +90,35 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="👌 Одобренные (к выплате)", callback_data="adm_list:approved:0")],
         [InlineKeyboardButton(text="✅ Выплаченные", callback_data="adm_list:completed:0")],
         [InlineKeyboardButton(text="❌ Отклонённые", callback_data="adm_list:rejected:0")],
+        [InlineKeyboardButton(text="🔎 Профиль пользователя", callback_data="admin_user_lookup")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="🎟 Промокоды", callback_data="admin_promos")],
+    ])
+
+
+def admin_user_profile_keyboard(user_id: int, is_banned: bool = False) -> InlineKeyboardMarkup:
+    """Admin actions for a user profile card."""
+    rows = [
+        [InlineKeyboardButton(text="🔄 Обновить", callback_data=f"admin_user_view:{user_id}")],
+        [InlineKeyboardButton(text="👥 Кого пригласил", callback_data=f"admin_user_refs:{user_id}")],
+    ]
+    if is_banned:
+        rows.append([InlineKeyboardButton(text="♻️ Разбанить", callback_data=f"admin_user_unban:{user_id}")])
+    else:
+        rows.append([InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_user_ban:{user_id}")])
+    rows.append([InlineKeyboardButton(text="🧹 Обнулить баланс", callback_data=f"admin_user_zero:{user_id}")])
+    rows.append([InlineKeyboardButton(text="🔎 Найти другого", callback_data="admin_user_lookup")])
+    rows.append([InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin_home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_user_refs_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Back buttons for an admin user's referrals list."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 Назад к профилю", callback_data=f"admin_user_view:{user_id}")],
+        [InlineKeyboardButton(text="🔎 Найти другого", callback_data="admin_user_lookup")],
+        [InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin_home")]
     ])
 
 
