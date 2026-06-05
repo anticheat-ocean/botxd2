@@ -2,6 +2,7 @@
 __pycache__/
 *.db
 *.log
+*.zip
 .env
 venv/
 env/

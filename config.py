@@ -39,8 +39,9 @@ class Config:
 
     # Block Arabic accounts (bot is for Russian-speaking users only)
     BLOCK_ARABIC: bool = os.getenv("BLOCK_ARABIC", "true").lower() == "true"
-    # Require users to share their phone number and block Arab-country phone codes
-    PHONE_GATE_ENABLED: bool = os.getenv("PHONE_GATE_ENABLED", "true").lower() == "true"
+    # Phone-number verification has been retired. Keep this forced off so old
+    # hosting environment variables cannot re-enable the contact request.
+    PHONE_GATE_ENABLED: bool = False
 
     # Anti-twink (fake/alt account) protection
     ANTITWINK_ENABLED: bool = os.getenv("ANTITWINK_ENABLED", "true").lower() == "true"
