@@ -68,7 +68,7 @@ class Config:
         x.strip()
         for x in os.getenv(
             "OWNER_CHANNEL_IDS",
-            "5372378314,-1003535579194,-1002749675652"
+            "@fdfdfkfkfkfkldl,@dfdfffgfgdg"
         ).replace("\n", ",").split(",")
         if x.strip()
     ]
