@@ -68,18 +68,29 @@ class Config:
         x.strip()
         for x in os.getenv(
             "OWNER_CHANNEL_IDS",
-            "@fdfdfkfkfkfkldl,@dfdfffgfgdg"
+            "-1003085639408,-1003535579194,-1002749675652"
         ).replace("\n", ",").split(",")
         if x.strip()
     ]
     OWNER_CHANNEL_URLS: List[str] = [
         x.strip()
-        for x in os.getenv("OWNER_CHANNEL_URLS", "").replace("\n", ",").split(",")
+        for x in os.getenv(
+            "OWNER_CHANNEL_URLS",
+            "https://t.me/fdfdfkfkfkfkldl,https://t.me/dfdfffgfgdg,https://t.me/paxatov_105"
+        ).replace("\n", ",").split(",")
         if x.strip()
     ]
+    _OWNER_CHANNEL_NAMES_RAW: str = os.getenv(
+        "OWNER_CHANNEL_NAMES",
+        "чат общение грам пиар чат ВЗ;;выплаты от бестрашного;;чиловый | NFT"
+    ).replace("\n", ";;")
     OWNER_CHANNEL_NAMES: List[str] = [
         x.strip()
-        for x in os.getenv("OWNER_CHANNEL_NAMES", "").replace("\n", "|").split("|")
+        for x in (
+            _OWNER_CHANNEL_NAMES_RAW.split(";;")
+            if ";;" in _OWNER_CHANNEL_NAMES_RAW
+            else _OWNER_CHANNEL_NAMES_RAW.split("|")
+        )
         if x.strip()
     ]
 
