@@ -352,6 +352,15 @@ async def process_withdraw(callback: CallbackQuery, db: Database, bot):
         await callback.answer("Ошибка: пользователь не найден")
         return
 
+    admin_channel_id = Config.admin_destination()
+    if not admin_channel_id:
+        await callback.answer(
+            "❌ Канал для заявок на вывод не настроен. Напишите администратору.",
+            show_alert=True
+        )
+        logger.error("Withdrawal blocked: ADMIN_CHANNEL_ID is not set")
+        return
+
     # Create withdrawal
     success, message, withdrawal_id = await db.create_withdrawal(user['user_id'], amount)
 
@@ -370,10 +379,10 @@ async def process_withdraw(callback: CallbackQuery, db: Database, bot):
     else:
         referrer_line = "🤝 Пригласил: — (пришёл сам)\n"
 
-    # Post the request to the admin channel (or admin DM as a fallback) with live buttons
+    # Post the request to the admin channel only. No private admin-DM fallback.
     try:
         await bot.send_message(
-            Config.admin_destination(),
+            admin_channel_id,
             f"🆕 <b>Новая заявка на вывод #{withdrawal_id}</b>\n\n"
             f"👤 Пользователь: {esc(get_user_display_name(user['username'], user['first_name'], user['user_id']))}\n"
             f"🆔 ID: <code>{user['user_id']}</code>\n"

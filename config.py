@@ -13,13 +13,14 @@ class Config:
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
     ADMIN_ID: int = int(os.getenv("ADMIN_ID", "0"))
     # Channel where withdrawal requests are posted for moderation.
-    # Bot must be an admin of this channel. Falls back to the admin's private chat if unset.
+    # Bot must be an admin of this channel. No private-DM fallback: withdrawals
+    # are channel-only by design.
     ADMIN_CHANNEL_ID: int = int(os.getenv("ADMIN_CHANNEL_ID", "0") or "0")
 
     @classmethod
     def admin_destination(cls) -> int:
-        """Where withdrawal notifications go: the admin channel if set, else admin's DM."""
-        return cls.ADMIN_CHANNEL_ID if cls.ADMIN_CHANNEL_ID else cls.ADMIN_ID
+        """Where withdrawal notifications go. Withdrawals are channel-only."""
+        return cls.ADMIN_CHANNEL_ID
 
     # Reward settings. Locked to the requested payout so stale hosting env vars
     # cannot accidentally keep the old value.
